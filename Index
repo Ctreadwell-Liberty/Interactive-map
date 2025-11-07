@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset='utf-8'/>
+<title>Apex – GitHub Map (Leaflet) • Rigs, Distance Filter, CSV Export</title>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css' integrity='sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=' crossorigin='anonymous'/>
+<style>
+  html, body { height: 100%; margin: 0; }
+  #map { height: 100%; }
+  .panel { position: absolute; top: 10px; right: 10px; z-index: 1000; background: #fff; padding: 12px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.2); font-family: Segoe UI, Roboto, Arial, sans-serif; font-size: 13px; width: 360px; }
+  .panel h4 { margin: 0 0 10px; font-size: 15px; }
+  .row { margin-top: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .pill { padding: 4px 8px; border: 1px solid #888; border-radius: 999px; background: #f7f7f7; cursor: pointer; }
+  .pill.active { background: #0078d4; color: #fff; border-color: #0078d4; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+  .field label { display: block; font-size: 12px; color: #444; margin-bottom: 2px; }
+  .field input { width: 100%; padding: 6px 8px; border: 1px solid #999; border-radius: 4px; }
+  button { padding: 6px 8px; border: 1px solid #888; background: #f7f7f7; border-radius: 4px; cursor: pointer; }
+  .meta { color: #666; font-size: 12px; }
+  .rig-list { max-height: 160px; overflow: auto; border: 1px solid #eee; border-radius: 4px; padding: 6px; width: 100%; }
+  .rig-item { display:flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed #eee; }
+  .rig-item:last-child { border-bottom: none; }
+  .searchbox input { width: 180px; padding: 4px 6px; border: 1px solid #999; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id='map'></div>
+<div class='panel'>
+  <h4>Rig Points • Distance Filter • CSV Export</h4>
+  <div class='row'>
+    <button id='exportRigs'>Export Rigs CSV</button>
+    <button id='exportRuns'>Export Visible Runs CSV</button>
+    <span id='count' class='meta' style='margin-left:auto;'></span>
+  </div>
+  <div class='row'>
+    <span>Radius:</span>
+    <button class='pill' data-r='5'>5 mi</button>
+    <button class='pill active' data-r='10'>10 mi</button>
+    <button class='pill' data-r='15'>15 mi</button>
+    <button class='pill' data-r='20'>20 mi</button>
+  </div>
+  <div class='row searchbox'>
+    <label for='searchTxt'>Search WELL/JOBNUM</label>
+    <input id='searchTxt' placeholder='Type & Enter'>
+    <button id='searchBtn'>Find</button>
+  </div>
+  <div class='row' style='width:100%'>
+    <div class='field' style='flex:1 1 100%'>
+      <label>Rig name (optional)</label>
+      <input id='rigName' type='text' placeholder='e.g., Apex 614'>
+    </div>
+  </div>
+  <div class='grid'>
+    <div class='field'>
+      <label>Lat</label>
+      <input id='lat' type='number' step='any' placeholder='e.g., 31.7926651'>
+    </div>
+    <div class='field'>
+      <label>Lon</label>
+      <input id='lon' type='number' step='any' placeholder='e.g., -93.4377293'>
+    </div>
+  </div>
+  <div class='row'>
+    <button id='addRig'>Add Rig</button>
+    <button id='clearRigs'>Clear Rigs</button>
+    <span class='meta'>Tip: click the map to prefill Lat/Lon; click anywhere to filter without saving a rig.</span>
+  </div>
+  <div class='row' style='width:100%'>
+    <div class='rig-list' id='rigList' style='width:100%'></div>
+  </div>
+</div>
+
+<script src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js' integrity='sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=' crossorigin='anonymous'></script>
+<script>
+const runsGeo = {"type":"FeatureCollection","features":[
+  {"type":"Feature","geometry":{"type":"Point","coordinates":[-97.06944,29.55009]},"properties":{"RUN_ID":"1","WELL":"NO. 1H - TRINITY UNIT - Wellbore 1","JOBNUM":"TX-DMP-220065","OPERATOR":"MATRIX PETROLEUM, LLC","RIG":"Ensign T120","STATE":"Texas","COUNTY":"Lavaca","BHA":"4","BHA_DESC":"BHA 4","DATEIN":"2022-08-28 23:59:59","DATEOUT":"2022-08-31 23:59:59","BIT_MAKE":"Drilformance","BIT_MODEL":"DF613","MOTOR_MODEL":"4/5 10.3","BENDANGLE":"2.0","AVG ROP":"114.934"}},
+  {"type":"Feature","geometry":{"type":"Point","coordinates":[-97.05994,29.57845]},"properties":{"RUN_ID":"2","WELL":"2H - Grover - Wellbore 1","JOBNUM":"TX-FP-210046","OPERATOR":"Modern Exploration Inc.","RIG":"Ensign T120","STATE":"Texas","COUNTY":"Lavaca","BHA":"4","BHA_DESC":"BHA 4","DATEIN":"2021-10-31 23:59:59","DATEOUT":"2021-11-03 23:59:59","BIT_MAKE":"Drilformance","BIT_MODEL":"513","MOTOR_MAKE":"DF","MOTOR_MODEL":"5","BENDANGLE":"2.0","AVG ROP":"120.158"}},
+  {"type":"Feature","geometry":{"type":"Point","coordinates":[-97.05994,29.57845]},"properties":{"RUN_ID":"3","WELL":"2H - Grover - Wellbore 1","JOBNUM":"TX-FP-210046","OPERATOR":"Modern Exploration Inc.","RIG":"Ensign T120","STATE":"Texas","COUNTY":"Lavaca","BHA":"5","BHA_DESC":"BHA 5","DATEIN":"2021-11-03 23:59:59","DATEOUT":"2021-11-05 23:59:59","BIT_MAKE":"Drilformance","BIT_MODEL":"DF513","MOTOR_MAKE":"DF","BENDANGLE":"2.0","AVG ROP":"0.0"}},
+  {"type":"Feature","geometry":{"type":"Point","coordinates":[-97.05994,29.57845]},"properties":{"RUN_ID":"4","WELL":"2H - Grover - Wellbore 1","JOBNUM":"TX-FP-210046","OPERATOR":"Modern Exploration Inc.","RIG":"Ensign T120","STATE":"Texas","COUNTY":"Lavaca","BHA":"6","BHA_DESC":"BHA 6","DATEIN":"2021-11-05 23:59:59","DATEOUT":"2021-11-07 23:59:59","BIT_MAKE":"Drilformance","BIT_MODEL":"DF513","MOTOR_MAKE":"DF","BENDANGLE":"2.0","AVG ROP":"81.117"}},
+  {"type":"Feature","geometry":{"type":"Point","coordinates":[-96.91273,30.10857]},"properties":{"RUN_ID":"5","WELL":"1H - BAMSCH-TEINERT - ST01","JOBNUM":"TX-FP-220064","OPERATOR":"Riley Permian Operating Co., LLC","RIG":"Ensign T120","STATE":"Texas","COUNTY":"Lee","BHA":"4","BHA_DESC":"BHA 4","DATEIN":"2022-07-19 23:59:59","DATEOUT":"2022-07-22 23:59:59","BIT_MAKE":"Drilformance","BIT_MODEL":"DFM 613","BENDANGLE":"1.83","AVG ROP":"138.97"}},
+  {"type":"Feature","geometry":{"type":"Point","coordinates":[-93.77341,32.12251]},"properties":{"RUN_ID":"8","WELL":"003-ALT - OH","OPERATOR":"ENSIGHT IV ENERGY MANAGEMENT, LLC","RIG":"Basin 103","BHA":"7","BHA_DESC":"BHA 7","DATEIN":"00:00:00","DATEOUT":"00:00:00","BIT_MAKE":"Diamant","BIT_MODEL":"SPD513","MOTOR_MODEL":"45103","BENDANGLE":"1.83","AVG ROP":"159.258"}},
+  {"type":"Feature","geometry":{"type":"Point","coordinates":[-94.44716,32.40865]},"properties":{"RUN_ID":"23","WELL":"GEORGE-LANDRY A 1H - OH","JOBNUM":"TX-DMP-250020","OPERATOR":"Sponte Resources","RIG":"Basin 101","STATE":"Texas","COUNTY":"Harrison","BHA":"6","BHA_DESC":"BHA 6","DATEIN":"2025-07-04 00:00:00","DATEOUT":"2025-07-08 00:00:00","BIT_MAKE":"Diamant","BIT_MODEL":"SPD513","MOTOR_MAKE":"Liberty","MOTOR_MODEL":"4/5 10.3","BENDANGLE":"1.83","AVG ROP":"177.64","COMMENTS":"TD WELL - Motor drained no slack, Bit was 0,1 CT. Assy. tracked well and slid good, slides yielded as expected. Had sevel 1K+ rotations. Motor stayed strong to TD. Very good run."}},
+  {"type":"Feature","geometry":{"type":"Point","coordinates":[-93.93487,32.58474]},"properties":{"RUN_ID":"127","WELL":"ANTHONY 31-30-19HC 2-ALT - OH","JOBNUM":"LA-FP-240033","OPERATOR":"TRINITY OPERATING","RIG":"Cactus 150","STATE":"Louisiana","COUNTY":"Caddo","BHA":"3","BHA_DESC":"BHA 3","DATEIN":"2024-07-16 23:59:59","DATEOUT":"2024-07-21 23:59:59","BIT_MAKE":"Diamant","BIT_MODEL":"SPD513","MOTOR_MODEL":"MOAB","BENDANGLE":"2.0","AVG ROP":"105.324","COMMENTS":"Motor Chunked - Motor drained freely upon out of the hole, could hear clicking sound when turning bit box w/ rotary in bearing housing. Bit graded @ 1/1/WT/S/X/I/PN/DMF"}},
+  {"type":"Feature","geometry":{"type":"Point","coordinates":[-93.93487,32.58474]},"properties":{"RUN_ID":"128","WELL":"ANTHONY 31-30-19HC 2-ALT - OH","JOBNUM":"LA-FP-240033","OPERATOR":"TRINITY OPERATING","RIG":"Cactus 150","STATE":"Louisiana","COUNTY":"Caddo","BHA":"4","BHA_DESC":"BHA 4","DATEIN":"2024-07-21 23:59:59","DATEOUT":"2024-07-24 23:59:59","BIT_MAKE":"Diamant","BIT_MODEL":"SPD513","MOTOR_MODEL":"MOAB","BENDANGLE":"2.0","AVG ROP":"70.585","COMMENTS":"Gordon MWD Failure - Lost sync with MWD and recycled, when we brought the pumps back up, we had gained 500 psi. Trouble shoot and seen MWD had quit pusling. We then tried short cycling tool and pumping a high vis sweep. MWD was still not pusling, so the decission was made to POOH for MWD.\nWhen we got to surface there was no visable damage to BHA. Motor drained good and had 3/8 slack. Bit was not plugged and was a 1-1"}}
+]};
+
+const initLat = 32.041082890625;
+const initLon = -93.993783046875;
+
+const map = L.map('map').setView([initLat, initLon], 8);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+const runsLayer = L.layerGroup().addTo(map);
+const rigsLayer = L.layerGroup().addTo(map);
+
+let currentRadius = 10;
+let selCircle = null, selMarker = null;
+let rigMarkers = [];
+
+function distMiles(lat1, lon1, lat2, lon2) {
+  const R = 3958.8;
+  const toRad = x => x * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+const runMarkers = runsGeo.features.map(f => {
+  const [lon, lat] = f.geometry.coordinates;
+  const p = f.properties;
+  const popup = `<div style="font-size:12px"><b>RUN ${p.RUN_ID}</b><br>${Object.keys(p).map(k => `<b>${k}</b>: ${p[k]}`).join('<br>')}</div>`;
+  const m = L.circleMarker([lat, lon], {radius: 5, color: '#d95f02', fillOpacity: 0.7}).bindPopup(popup);
+  m.lat = lat; m.lon = lon; m.featureProps = p;
+  return m;
+});
+
+function showAllRuns() {
+  runsLayer.clearLayers();
+  runMarkers.forEach(m => runsLayer.addLayer(m));
+  updateCount(runMarkers.length);
+}
+
+function updateCount(n) {
+  const el = document.getElementById('count');
+  if (el) el.textContent = `${n} run(s) visible`;
+}
+
+function setSelection(lat, lon) {
+  if (selMarker) runsLayer.removeLayer(selMarker);
+  if (selCircle) runsLayer.removeLayer(selCircle);
+  selMarker = L.marker([lat, lon]);
+  selCircle = L.circle([lat, lon], {radius: currentRadius * 1609.34, color: '#0078d4', fill: false});
+  runsLayer.addLayer(selMarker);
+  runsLayer.addLayer(selCircle);
+  filterBy(lat, lon, currentRadius);
+}
+
+function filterBy(lat, lon, radiusMiles) {
+  runsLayer.clearLayers();
+  const kept = runMarkers.filter(m => distMiles(lat, lon, m.lat, m.lon) <= radiusMiles);
+  kept.forEach(m => { m.distance_mi = distMiles(lat, lon, m.lat, m.lon); runsLayer.addLayer(m); });
+  if (selMarker) runsLayer.addLayer(selMarker);
+  if (selCircle) { selCircle.setRadius(radiusMiles * 1609.34); runsLayer.addLayer(selCircle); }
+  updateCount(kept.length);
+}
+
+map.on('click', e => {
+  document.getElementById('lat').value = e.latlng.lat.toFixed(6);
+  document.getElementById('lon').value = e.latlng.lng.toFixed(6);
+  setSelection(e.latlng.lat, e.latlng.lng);
+});
+
+document.querySelectorAll('.pill').forEach(btn => btn.addEventListener('click', () => {
+  document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentRadius = parseFloat(btn.dataset.r);
+  const lat = parseFloat(document.getElementById('lat').value);
+  const lon = parseFloat(document.getElementById('lon').value);
+  if (selMarker && isFinite(lat) && isFinite(lon)) filterBy(lat, lon, currentRadius);
+}));
+
+function addRig() {
+  const name = document.getElementById('rigName').value.trim();
+  const lat = parseFloat(document.getElementById('lat').value);
+  const lon = parseFloat(document.getElementById('lon').value);
+  if (!isFinite(lat) || !isFinite(lon)) { alert('Enter valid Lat/Lon'); return; }
+  const marker = L.marker([lat, lon], {title: name || 'Rig'}).addTo(rigsLayer);
+  if (name) marker.bindPopup(`<b>${name}</b><br>Lat: ${lat.toFixed(6)}, Lon: ${lon.toFixed(6)}`);
+  const rig = {name, lat, lon, marker, circle: null};
+  rigMarkers.push(rig);
+  addRigToList(rig);
+  if (selMarker) runsLayer.removeLayer(selMarker);
+  if (selCircle) rigsLayer.removeLayer(selCircle);
+  selMarker = marker;
+  selCircle = L.circle([lat, lon], {radius: currentRadius * 1609.34, color: '#0078d4', fill: false}).addTo(rigsLayer);
+  filterBy(lat, lon, currentRadius);
+}
+
+function clearRigs() {
+  rigMarkers.forEach(r => { rigsLayer.removeLayer(r.marker); if (r.circle) rigsLayer.removeLayer(r.circle); });
+  rigMarkers = [];
+  document.getElementById('rigList').innerHTML = '';
+  if (selCircle) { rigsLayer.removeLayer(selCircle); selCircle = null; }
+  if (selMarker) { runsLayer.removeLayer(selMarker); selMarker = null; }
+  showAllRuns();
+}
+
+document.getElementById('addRig').addEventListener('click', addRig);
+document.getElementById('clearRigs').addEventListener('click', clearRigs);
+
+function addRigToList(rig) {
+  const list = document.getElementById('rigList');
+  const div = document.createElement('div'); div.className = 'rig-item';
+  const name = rig.name || `Rig ${rigMarkers.length}`;
+  div.innerHTML = `<span><b>${name}</b> — Lat ${rig.lat.toFixed(6)}, Lon ${rig.lon.toFixed(6)}</span>
+                   <span><button data-act='zoom'>Zoom</button> <button data-act='select'>Select</button> <button data-act='remove'>Remove</button></span>`;
+  list.appendChild(div);
+  div.addEventListener('click', e => {
+    const act = e.target.dataset.act;
+    if (act === 'zoom') map.setView([rig.lat, rig.lon], 12);
+    if (act === 'select') {
+      if (selMarker) runsLayer.removeLayer(selMarker);
+      if (selCircle) rigsLayer.removeLayer(selCircle);
+      selMarker = rig.marker;
+      selCircle = L.circle([rig.lat, rig.lon], {radius: currentRadius * 1609.34, color: '#0078d4', fill: false}).addTo(rigsLayer);
+      filterBy(rig.lat, rig.lon, currentRadius);
+    }
+    if (act === 'remove') {
+      rigsLayer.removeLayer(rig.marker);
+      if (rig.circle) rigsLayer.removeLayer(rig.circle);
+      rigMarkers = rigMarkers.filter(r => r !== rig);
+      div.remove();
+      if (selMarker === rig.marker) { selMarker = null; if (selCircle) rigsLayer.removeLayer(selCircle); selCircle = null; showAllRuns(); }
+    }
+  });
+}
+
+function searchRuns() {
+  const q = (document.getElementById('searchTxt').value || '').toLowerCase().trim();
+  if (!q) return;
+  const found = runMarkers.find(m => {
+    const p = m.featureProps;
+    return ['WELL', 'JOBNUM'].some(f => p[f] && String(p[f]).toLowerCase().includes(q));
+  });
+  if (found) { map.setView([found.lat, found.lon], 13); found.openPopup(); }
+}
+
+document.getElementById('searchBtn').addEventListener('click', searchRuns);
+document.getElementById('searchTxt').addEventListener('keypress', e => { if (e.key === 'Enter') searchRuns(); });
+
+function exportCSV(rows, filename) {
+  if (!rows.length) { alert('Nothing to export.'); return; }
+  const cols = Object.keys(rows[0]);
+  const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+  const lines = [cols.join(',')].concat(rows.map(r => cols.map(c => esc(r[c] ?? '')).join(',')));
+  const csv = lines.join('\n');
+  const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+document.getElementById('exportRigs').addEventListener('click', () => {
+  const rows = rigMarkers.map((r, i) => ({INDEX: i+1, NAME: r.name || '', LAT: r.lat, LON: r.lon}));
+  exportCSV(rows, 'rig_points.csv');
+});
+
+document.getElementById('exportRuns').addEventListener('click', () => {
+  const rows = [];
+  runsLayer.eachLayer(l => {
+    if (l.featureProps) {
+      const r = {...l.featureProps};
+      if (typeof l.distance_mi === 'number') r.DISTANCE_MI = l.distance_mi.toFixed(2);
+      if (selMarker) r.REFERENCE_POINT = `${selMarker.getLatLng().lat.toFixed(6)},${selMarker.getLatLng().lng.toFixed(6)}`;
+      rows.push(r);
+    }
+  });
+  exportCSV(rows, 'visible_runs.csv');
+});
+
+showAllRuns();
+</script>
+</body>
+</html>

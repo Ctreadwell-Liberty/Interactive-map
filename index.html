@@ -57,7 +57,7 @@ let radiusCircle = null;
 let allRuns = [];
 
 // This will work 100% of the time now
-d3.csv("Runs.csv")
+d3.csv("runs.csv")
   .then(data => {
     allRuns = data.filter(d => d.LAT && d.LONG);
     console.log("Loaded", allRuns.length, "runs");
@@ -67,7 +67,7 @@ d3.csv("Runs.csv")
   .catch(err => {
     document.getElementById('map').style.display = 'none';
     document.getElementById('error').style.display = 'block';
-    document.getElementById('msg').textContent = "Could not load Runs.csv – check filename";
+    document.getElementById('msg').textContent = "Could not load runs.csv – check filename";
   });
 
 function draw() {

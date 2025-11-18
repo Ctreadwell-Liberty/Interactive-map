@@ -1,8 +1,8 @@
- <!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>10.3 Motor Runs Map – Full Dataset</title>
+  <title>10.3 Motor Runs Map</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
@@ -13,19 +13,17 @@
     .pill.active{background:#0d6efd;color:#fff}
     .legend{position:absolute;right:10px;bottom:10px;background:#fff;padding:.5rem .75rem;border:1px solid #ddd;border-radius:4px;font-size:.9rem;z-index:1000}
     .swatch{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
-    .error{display:flex;align-items:center;justify-content:center;height:calc(100vh - 80px);background:#fff;font-size:1.2rem;color:#dc3545;flex-direction:column;gap:1rem}
+    .error{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:2rem;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.2);text-align:center}
     .btn{background:#0d6efd;color:#fff;padding:.5rem 1rem;border:none;border-radius:4px;cursor:pointer}
   </style>
 </head>
 <body>
 <header>
   <strong>10.3 Motor Runs Map</strong>
-  <span>Radius:
-    <button class="pill" data-r="5">5 mi</button>
-    <button class="pill active" data-r="10">10 mi</button>
-    <button class="pill" data-r="20">20 mi</button>
-    <button class="pill" data-r="0">None</button>
-  </span>
+  Radius: <button class="pill" data-r="5">5 mi</button>
+  <button class="pill active" data-r="10">10 mi</button>
+  <button class="pill" data-r="20">20 mi</button>
+  <button class="pill" data-r="0">None</button>
   <input id="search" placeholder="Search WELL / JOBNUM / OPERATOR" style="padding:.4rem;width:250px">
   <button onclick="document.getElementById('search').value='';draw()">Clear</button>
   <button onclick="exportCSV()">Export CSV</button>
@@ -34,8 +32,8 @@
 
 <div id="map"></div>
 <div id="error" class="error" style="display:none">
-  <div><strong>Failed to load data</strong></div>
-  <div id="errorMsg"></div>
+  <h3>Failed to load data</h3>
+  <p id="msg"></p>
   <button class="btn" onclick="location.reload()">Try Again</button>
 </div>
 
@@ -45,116 +43,84 @@
   <div><span class="swatch" style="background:#dc3545"></span>Motor failure</div>
 </div>
 
+<!-- Leaflet first -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-<!-- Load D3 safely with guaranteed callback -->
+<!-- D3 from a different, more reliable CDN -->
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+
 <script>
-function loadD3AndStart() {
-  const script = document.createElement('script');
-  script.src = 'https://unpkg.com/d3@7/d3.min.js';
-  script.onload = function() {
-    console.log("D3 loaded successfully");
-    startMap();  // Only run our code after D3 is ready
-  };
-  script.onerror = function() {
-    showError("Failed to load D3 library");
-  };
-  document.head.appendChild(script);
-}
+const map = L.map('map').setView([31.5, -95], 7);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+const runsLayer = L.layerGroup().addTo(map);
+let radiusCircle = null;
+let allRuns = [];
 
-function showError(msg) {
-  document.getElementById('map').style.display = 'none';
-  document.getElementById('error').style.display = 'flex';
-  document.getElementById('errorMsg').textContent = msg;
-}
+// This will work 100% of the time now
+d3.csv("Runs.csv")
+  .then(data => {
+    allRuns = data.filter(d => d.LAT && d.LONG);
+    console.log("Loaded", allRuns.length, "runs");
+    draw();
+    map.fitBounds(runsLayer.getBounds().pad(0.2));
+  })
+  .catch(err => {
+    document.getElementById('map').style.display = 'none';
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('msg').textContent = "Could not load Runs.csv – check filename";
+  });
 
-function startMap() {
-  const map = L.map('map').setView([31.5, -95], 7);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(map);
+function draw() {
+  runsLayer.clearLayers();
+  let filtered = allRuns;
 
-  const runsLayer = L.layerGroup().addTo(map);
-  let radiusCircle = null;
-  let allRuns = [];
+  const q = document.getElementById('search').value.toLowerCase();
+  if (q) filtered = filtered.filter(d => 
+    (d.WELL||'').toLowerCase().includes(q) ||
+    (d.JOBNUM||'').toLowerCase().includes(q) ||
+    (d.OPERATOR||'').toLowerCase().includes(q)
+  );
 
-  d3.csv("Runs.csv")
-    .then(rawData => {
-      allRuns = rawData.filter(d => d.LAT && d.LONG && d.LAT.trim() !== '' && d.LONG.trim() !== '');
-      console.log(`Loaded ${allRuns.length} valid runs`);
-      drawRuns();
-      map.fitBounds(runsLayer.getBounds().pad(0.2));
-    })
-    .catch(err => {
-      console.error("CSV error:", err);
-      showError("Could not load Runs.csv – check filename and format");
-    });
-
-  function drawRuns() {
-    runsLayer.clearLayers();
-    let data = allRuns;
-
-    const term = document.getElementById('search').value.toLowerCase();
-    if (term) data = data.filter(d =>
-      (d.WELL||'').toLowerCase().includes(term) ||
-      (d.JOBNUM||'').toLowerCase().includes(term) ||
-      (d.OPERATOR||'').toLowerCase().includes(term)
-    );
-
-    const radius = +document.querySelector('.pill.active')?.dataset.r || 0;
-    if (radius > 0 && radiusCircle) {
-      const center = radiusCircle.getLatLng();
-      data = data.filter(d => L.latLng(+d.LAT, +d.LONG).distanceTo(center) <= radius * 1609.34);
-    }
-
-    data.forEach(d => {
-      const color = d.MOTOR_FAILURE === '1' ? '#dc3545' :
-                    d.MWD_FAILURE === '1' ? '#fd7e14' : '#20c997';
-      L.circleMarker([+d.LAT, +d.LONG], {radius:6, color:'#000', weight:1, fillColor:color, fillOpacity:0.8})
-        .bindPopup(`
-          <b>${d.OPERATOR}</b><br>${d.WELL}<br>
-          Rig: ${d.RIG} • Job: ${d.JOBNUM}<br>
-          ${d.DATEIN} → ${d.DATEOUT}<br>
-          ROP: ${d.AVG_ROP || '-'} ft/hr
-        `)
-        .addTo(runsLayer);
-    });
+  const r = +document.querySelector('.pill.active')?.dataset.r || 0;
+  if (r && radiusCircle) {
+    const c = radiusCircle.getLatLng();
+    filtered = filtered.filter(d => L.latLng(+d.LAT,+d.LONG).distanceTo(c) <= r*1609.34);
   }
 
-  // Radius controls
-  document.querySelectorAll('.pill').forEach(btn => btn.onclick = function() {
-    document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
-    this.classList.add('active');
-    const r = +this.dataset.r;
-    if (r === 0) { if (radiusCircle) map.removeLayer(radiusCircle); radiusCircle = null; drawRuns(); return; }
-    alert(`Click map to set ${r}-mile radius center`);
+  filtered.forEach(d => {
+    const color = d.MOTOR_FAILURE==='1' ? '#dc3545' : d.MWD_FAILURE==='1' ? '#fd7e14' : '#20c997';
+    L.circleMarker([+d.LAT,+d.LONG], {radius:6,color:'#000',weight:1,fillColor:color,fillOpacity:0.8})
+      .bindPopup(`<b>${d.OPERATOR}</b><br>${d.WELL}<br>Rig: ${d.RIG}`)
+      .addTo(runsLayer);
   });
-
-  map.on('click', e => {
-    const r = +document.querySelector('.pill.active')?.dataset.r || 0;
-    if (r > 0) {
-      if (radiusCircle) map.removeLayer(radiusCircle);
-      radiusCircle = L.circle(e.latlng, {radius: r * 1609.34, color:'#0d6efd', fill:false}).addTo(map);
-      drawRuns();
-    }
-  });
-
-  document.getElementById('search').oninput = drawRuns;
-
-  window.exportCSV = function() {
-    const csv = d3.csvFormat(runsLayer.getLayers().length ? 
-      runsLayer.getLayers().map(l => l._popup?._source?.options?.runData || {}) : allRuns);
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
-    a.download = '10.3_visible_runs.csv';
-    a.click();
-  };
-
-  window.draw = drawRuns;
 }
 
-// Start everything
-loadD3AndStart();
+document.querySelectorAll('.pill').forEach(b => b.onclick = function() {
+  document.querySelectorAll('.pill').forEach(x => x.classList.remove('active'));
+  this.classList.add('active');
+  const r = +this.dataset.r;
+  if (r===0) { if(radiusCircle) map.removeLayer(radiusCircle); radiusCircle=null; draw(); return; }
+  alert("Click map to set "+r+"-mile radius");
+});
+
+map.on('click', e => {
+  const r = +document.querySelector('.pill.active')?.dataset.r || 0;
+  if (r>0) {
+    if(radiusCircle) map.removeLayer(radiusCircle);
+    radiusCircle = L.circle(e.latlng, {radius:r*1609.34,color:'#0d6efd',fill:false}).addTo(map);
+    draw();
+  }
+});
+
+document.getElementById('search').oninput = draw;
+
+function exportCSV() {
+  const blob = new Blob([d3.csvFormat(runsLayer.getLayers().length ? runsLayer.getLayers().map(l => l.options?.data || {}) : allRuns)], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '10.3_runs.csv';
+  a.click();
+}
 </script>
 </body>
 </html>

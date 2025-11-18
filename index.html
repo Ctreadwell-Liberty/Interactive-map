@@ -29,12 +29,12 @@
   <input id="search" placeholder="Search WELL / JOBNUM / OPERATOR" style="padding:.4rem;width:250px">
   <button onclick="document.getElementById('search').value='';draw()">Clear</button>
   <button onclick="exportCSV()">Export CSV</button>
-  <button onclick="location.reload()">Reload Map</button>
+  <button onclick="location.reload()">Reload</button>
 </header>
 
 <div id="map"></div>
 <div id="error" class="error" style="display:none">
-  <div><strong>Failed to load Runs.csv</strong></div>
+  <div><strong>Failed to load data</strong></div>
   <div id="errorMsg"></div>
   <button class="btn" onclick="location.reload()">Try Again</button>
 </div>
@@ -46,94 +46,115 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/d3@7/d3.min.js"></script>
+
+<!-- Load D3 safely with guaranteed callback -->
 <script>
-const map = L.map('map').setView([31.5, -95], 7);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; OpenStreetMap contributors'
-}).addTo(map);
-
-const runsLayer = L.layerGroup().addTo(map);
-let radiusCircle = null;
-let allRuns = [];
-
-// Full error handling for CSV
-d3.csv("Runs.csv")
-  .then(rawData => {
-    allRuns = rawData.filter(d => d.LAT && d.LONG && d.LAT.trim() !== '' && d.LONG.trim() !== '');
-    console.log(`Successfully loaded ${allRuns.length} runs`);
-    drawRuns();
-    map.fitBounds(runsLayer.getBounds().pad(0.2));
-  })
-  .catch(err => {
-    console.error("CSV load failed:", err);
-    document.getElementById('map').style.display = 'none';
-    document.getElementById('error').style.display = 'flex';
-    document.getElementById('errorMsg').textContent = 
-      err.status === 404 ? "File 'Runs.csv' not found in repository." :
-      err.status ? `HTTP ${err.status} – Server error` :
-      "Could not load or parse Runs.csv – check file format and name.";
-  });
-
-function drawRuns() {
-  runsLayer.clearLayers();
-  let data = allRuns;
-
-  const term = document.getElementById('search').value.toLowerCase();
-  if (term) data = data.filter(d =>
-    (d.WELL||'').toLowerCase().includes(term) ||
-    (d.JOBNUM||'').toLowerCase().includes(term) ||
-    (d.OPERATOR||'').toLowerCase().includes(term)
-  );
-
-  const radius = +document.querySelector('.pill.active')?.dataset.r || 0;
-  if (radius > 0 && radiusCircle) {
-    const center = radiusCircle.getLatLng();
-    data = data.filter(d => L.latLng(+d.LAT, +d.LONG).distanceTo(center) <= radius * 1609.34);
-  }
-
-  data.forEach(d => {
-    const color = d.MOTOR_FAILURE === '1' ? '#dc3545' :
-                  d.MWD_FAILURE === '1' ? '#fd7e14' : '#20c997';
-    L.circleMarker([+d.LAT, +d.LONG], {radius:6, color:'#000', weight:1, fillColor:color, fillOpacity:0.8})
-      .bindPopup(`
-        <b>${d.OPERATOR}</b><br>${d.WELL}<br>
-        Rig: ${d.RIG} • Job: ${d.JOBNUM}<br>
-        ${d.DATEIN} → ${d.DATEOUT}<br>
-        ROP: ${d.AVG_ROP || '-'} ft/hr
-      `)
-      .addTo(runsLayer);
-  });
+function loadD3AndStart() {
+  const script = document.createElement('script');
+  script.src = 'https://unpkg.com/d3@7/d3.min.js';
+  script.onload = function() {
+    console.log("D3 loaded successfully");
+    startMap();  // Only run our code after D3 is ready
+  };
+  script.onerror = function() {
+    showError("Failed to load D3 library");
+  };
+  document.head.appendChild(script);
 }
 
-// Radius controls
-document.querySelectorAll('.pill').forEach(btn => btn.onclick = function() {
-  document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
-  this.classList.add('active');
-  const r = +this.dataset.r;
-  if (r === 0) { if (radiusCircle) map.removeLayer(radiusCircle); radiusCircle = null; drawRuns(); return; }
-  alert(`Click map to set ${r}-mile radius center`);
-});
-
-map.on('click', e => {
-  const r = +document.querySelector('.pill.active')?.dataset.r || 0;
-  if (r > 0) {
-    if (radiusCircle) map.removeLayer(radiusCircle);
-    radiusCircle = L.circle(e.latlng, {radius: r * 1609.34, color:'#0d6efd', fill:false}).addTo(map);
-    drawRuns();
-  }
-});
-
-document.getElementById('search').oninput = drawRuns;
-
-function exportCSV() {
-  const csv = d3.csvFormat(runsLayer.getLayers().length ? 
-    runsLayer.getLayers().map(l => l._popup?._source?.options?.runData || {}) : allRuns);
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
-  a.download = '10.3_visible_runs.csv';
-  a.click();
+function showError(msg) {
+  document.getElementById('map').style.display = 'none';
+  document.getElementById('error').style.display = 'flex';
+  document.getElementById('errorMsg').textContent = msg;
 }
+
+function startMap() {
+  const map = L.map('map').setView([31.5, -95], 7);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  const runsLayer = L.layerGroup().addTo(map);
+  let radiusCircle = null;
+  let allRuns = [];
+
+  d3.csv("Runs.csv")
+    .then(rawData => {
+      allRuns = rawData.filter(d => d.LAT && d.LONG && d.LAT.trim() !== '' && d.LONG.trim() !== '');
+      console.log(`Loaded ${allRuns.length} valid runs`);
+      drawRuns();
+      map.fitBounds(runsLayer.getBounds().pad(0.2));
+    })
+    .catch(err => {
+      console.error("CSV error:", err);
+      showError("Could not load Runs.csv – check filename and format");
+    });
+
+  function drawRuns() {
+    runsLayer.clearLayers();
+    let data = allRuns;
+
+    const term = document.getElementById('search').value.toLowerCase();
+    if (term) data = data.filter(d =>
+      (d.WELL||'').toLowerCase().includes(term) ||
+      (d.JOBNUM||'').toLowerCase().includes(term) ||
+      (d.OPERATOR||'').toLowerCase().includes(term)
+    );
+
+    const radius = +document.querySelector('.pill.active')?.dataset.r || 0;
+    if (radius > 0 && radiusCircle) {
+      const center = radiusCircle.getLatLng();
+      data = data.filter(d => L.latLng(+d.LAT, +d.LONG).distanceTo(center) <= radius * 1609.34);
+    }
+
+    data.forEach(d => {
+      const color = d.MOTOR_FAILURE === '1' ? '#dc3545' :
+                    d.MWD_FAILURE === '1' ? '#fd7e14' : '#20c997';
+      L.circleMarker([+d.LAT, +d.LONG], {radius:6, color:'#000', weight:1, fillColor:color, fillOpacity:0.8})
+        .bindPopup(`
+          <b>${d.OPERATOR}</b><br>${d.WELL}<br>
+          Rig: ${d.RIG} • Job: ${d.JOBNUM}<br>
+          ${d.DATEIN} → ${d.DATEOUT}<br>
+          ROP: ${d.AVG_ROP || '-'} ft/hr
+        `)
+        .addTo(runsLayer);
+    });
+  }
+
+  // Radius controls
+  document.querySelectorAll('.pill').forEach(btn => btn.onclick = function() {
+    document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
+    this.classList.add('active');
+    const r = +this.dataset.r;
+    if (r === 0) { if (radiusCircle) map.removeLayer(radiusCircle); radiusCircle = null; drawRuns(); return; }
+    alert(`Click map to set ${r}-mile radius center`);
+  });
+
+  map.on('click', e => {
+    const r = +document.querySelector('.pill.active')?.dataset.r || 0;
+    if (r > 0) {
+      if (radiusCircle) map.removeLayer(radiusCircle);
+      radiusCircle = L.circle(e.latlng, {radius: r * 1609.34, color:'#0d6efd', fill:false}).addTo(map);
+      drawRuns();
+    }
+  });
+
+  document.getElementById('search').oninput = drawRuns;
+
+  window.exportCSV = function() {
+    const csv = d3.csvFormat(runsLayer.getLayers().length ? 
+      runsLayer.getLayers().map(l => l._popup?._source?.options?.runData || {}) : allRuns);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+    a.download = '10.3_visible_runs.csv';
+    a.click();
+  };
+
+  window.draw = drawRuns;
+}
+
+// Start everything
+loadD3AndStart();
 </script>
 </body>
 </html>

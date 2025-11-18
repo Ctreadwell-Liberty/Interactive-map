@@ -2,39 +2,32 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>10.3 Motor Runs Map – Full Dataset (Nov 17 2025)</title>
+  <title>10.3 Motor Runs Map – Full Dataset</title Additions
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
-    body { margin:0; font-family:system-ui,sans-serif; }
-    header { padding:1rem; border-bottom:1px solid #ddd; background:#fff; display:flex; flex-wrap:wrap; gap:1rem; align-items:center; }
-    header .group { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
-    #map { height:calc(100vh - 80px); }
-    .pill { padding:.3rem .6rem; border:1px solid #ddd; border-radius:99px; cursor:pointer; }
-    .pill.active { background:#0d6efd; color:#fff; border-color:#0d6efd; }
-    .legend { position:absolute; right:10px; bottom:10px; background:#fff; padding:.5rem .75rem; border:1px solid #ddd; border-radius:4px; font-size:.9rem; z-index:1000; }
-    .swatch { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; }
+    body{margin:0;font-family:system-ui,sans-serif}
+    header{padding:1rem;border-bottom:1px solid #ddd;background:#fff;display:flex;flex-wrap:wrap;gap:1rem;align-items:center}
+    #map{height:calc(100vh - 80px)}
+    .pill{padding:.3rem .6rem;border:1px solid #ddd;border-radius:99px;cursor:pointer}
+    .pill.active{background:#0d6efd;color:#fff}
+    .legend{position:absolute;right:10px;bottom:10px;background:#fff;padding:.5rem .75rem;border:1px solid #ddd;border-radius:4px;font-size:.9rem;z-index:1000}
+    .swatch{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
   </style>
 </head>
 <body>
 <header>
   <strong>10.3 Motor Runs Map</strong>
-  <div class="group">
-    Radius:
+  <span>Radius:
     <button class="pill" data-r="5">5 mi</button>
     <button class="pill active" data-r="10">10 mi</button>
-    <button class="pill" data-r="15">15 mi</button>
     <button class="pill" data-r="20">20 mi</button>
     <button class="pill" data-r="0">None</button>
-  </div>
-  <div class="group">
-    <input id="search" placeholder="Search WELL / JOBNUM / OPERATOR" style="padding:.4rem;width:250px">
-    <button onclick="document.getElementById('search').value='';draw()">Clear</button>
-  </div>
-  <div class="group">
-    <button onclick="exportCSV()">Export Visible Runs CSV</button>
-    <button onclick="location.reload()">Reset Map</button>
-  </div>
+  </span>
+  <input id="search" placeholder="Search WELL / JOBNUM / OPERATOR" style="padding:.4rem;width:250px">
+  <button onclick="document.getElementById('search').value='';draw()">Clear</button>
+  <button onclick="exportCSV()">Export CSV</button>
+  <button onclick="location.reload()">Reset</button>
 </header>
 
 <div id="map"></div>
@@ -45,9 +38,11 @@
   <div><span class="swatch" style="background:#dc3545"></span>Motor failure</div>
 </div>
 
+<!-- Load Leaflet first, then D3, then our script -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/d3@7/d3.min.js"></script>
 <script>
+// Now D3 is guaranteed to be loaded
 const map = L.map('map').setView([31.5, -95], 7);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors'
@@ -59,16 +54,15 @@ let allRuns = [];
 
 d3.csv("Runs.csv").then(rawData => {
   allRuns = rawData.filter(d => d.LAT && d.LONG && d.LAT.trim() !== '' && d.LONG.trim() !== '');
-  console.log(`Loaded ${allRuns.length} runs from Runs.csv`);
+  console.log(`Loaded ${allRuns.length} valid runs from Runs.csv`);
   drawRuns();
   map.fitBounds(runsLayer.getBounds().pad(0.2));
-});
+}).catch(err => console.error("CSV load failed:", err));
 
 function drawRuns() {
   runsLayer.clearLayers();
   let data = allRuns;
 
-  // Search filter
   const term = document.getElementById('search').value.toLowerCase();
   if (term) {
     data = data.filter(d =>
@@ -78,80 +72,62 @@ function drawRuns() {
     );
   }
 
-  // Radius filter
   const radius = +document.querySelector('.pill.active')?.dataset.r || 0;
   if (radius > 0 && radiusCircle) {
     const center = radiusCircle.getLatLng();
     data = data.filter(d => 
-      L.latLng(d.LAT, d.LONG).distanceTo(center) <= radius * 1609.34
+      L.latLng(+d.LAT, +d.LONG).distanceTo(center) <= radius * 1609.34
     );
   }
 
   data.forEach(d => {
     const color = d.MOTOR_FAILURE === '1' ? '#dc3545' :
                   d.MWD_FAILURE === '1' ? '#fd7e14' : '#20c997';
-    L.circleMarker([d.LAT, d.LONG], {
+    L.circleMarker([+d.LAT, +d.LONG], {
       radius: 6,
-      weight: 1,
       color: '#000',
+      weight: 1,
       fillColor: color,
       fillOpacity: 0.8
     })
     .bindPopup(`
-      <b>${d.OPERATOR || 'Unknown Operator'}</b><br>
-      Well: ${d.WELL || '—'}<br>
-      Rig: ${d.RIG || '—'} | Job: ${d.JOBNUM || '—'}<br>
-      Dates: ${d.DATEIN || '?'} → ${d.DATEOUT || '?'}<br>
-      ROP: ${d.AVG_ROP || '—'} ft/hr | Drilled: ${d['TOTAL DRILL'] || '—'} ft<br>
-      Motor: ${d.MOTOR_MAKE || ''} ${d.MOTOR_MODEL || ''} @ ${d.BENDANGLE || ''}°<br>
-      Comments: ${d.COMMENTS || '—'}
+      <b>${d.OPERATOR}</b><br>
+      ${d.WELL}<br>
+      Rig: ${d.RIG} • Job: ${d.JOBNUM}<br>
+      ${d.DATEIN} → ${d.DATEOUT}<br>
+      ROP: ${d.AVG_ROP} ft/hr • Drilled: ${d['TOTAL DRILL']} ft
     `)
     .addTo(runsLayer);
   });
 }
 
 // Radius buttons
-document.querySelectorAll('.pill').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
-    this.classList.add('active');
-    const r = +this.dataset.r;
-    if (r === 0) {
-      if (radiusCircle) map.removeLayer(radiusCircle);
-      radiusCircle = null;
-      drawRuns();
-      return;
-    }
-    alert(`Click the map to set the ${r}-mile radius center`);
-  });
+document.querySelectorAll('.pill').forEach(btn => btn.onclick = function() {
+  document.querySelectorAll('.pill').forEach(b => b.classList.toggle('active', b===this));
+  const r = +this.dataset.r;
+  if (r === 0) { if (radiusCircle) map.removeLayer(radiusCircle); radiusCircle = null; drawRuns(); return; }
+  alert(`Click map to set ${r}-mile radius center`);
 });
 
 map.on('click', e => {
   const r = +document.querySelector('.pill.active')?.dataset.r || 0;
   if (r > 0) {
     if (radiusCircle) map.removeLayer(radiusCircle);
-    radiusCircle = L.circle(e.latlng, {
-      radius: r * 1609.34,
-      color: '#0d6efd',
-      fill: false,
-      weight: 3
-    }).addTo(map);
+    radiusCircle = L.circle(e.latlng, {radius: r * 1609.34, color: '#0d6efd', fill: false}).addTo(map);
     drawRuns();
   }
 });
 
-document.getElementById('search').addEventListener('input', drawRuns);
+document.getElementById('search').oninput = drawRuns;
 
 function exportCSV() {
-  const visible = runsLayer.getLayers().map(l => l.options?.runData || {});
+  const visible = runsLayer.getLayers().map(l => l._popup._source.options.runData || {});
   const csv = visible.length ? d3.csvFormat(visible) : d3.csvFormat(allRuns);
   const blob = new Blob([csv], {type: 'text/csv'});
-  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
+  a.href = URL.createObjectURL(blob);
   a.download = '10.3_visible_runs.csv';
   a.click();
-  URL.revokeObjectURL(url);
 }
 </script>
 </body>
